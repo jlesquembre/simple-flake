@@ -16,15 +16,13 @@
         {
           packages =
             {
-              default = pkgs.callPackage ./pkgs/default.nix {
-                projectSrc = ./.;
+              default = pkgs.callPackage "${nixpkgs}/pkgs/applications/misc/simple-pkg/default.nix" {
+                # Use this as src, overriding the value on nixpkgs
+                projectInfo = {
+                  src = ./.;
+                  version = "DEV";
+                };
               };
-
-              # On nixpkgs we should have something like this on pkgs/top-level/all-packages.nix:
-              # callPackage ../pkgs/path/to/my-package { };
-              # In this example, that repository have a default.nix file (just a copy of `pkgs/default.nix` on this repo)
-              # an a `info.json` file (generated with `passthru.updateScript`)
-
             };
         });
 }
