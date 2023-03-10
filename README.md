@@ -1,64 +1,100 @@
-# Nixpkgs Updater example
+# Share code example
 
 This is an example for https://github.com/NixOS/nixpkgs/issues/217679
 
-The goal is automatically keep in sync open source projects providing a nix
-derivation (like this project) with nixpkgs.
+The goal is to reduce duplication between Nixpkgs and Nix files in upstream
+projects (like this project).
 
-To do that, we can use 2 new helper functions( `nixpkgsUpdater` and
-`srcFromJSON`) and follow some convetions:
+To do that, the idea is to commit the shared nix expressions to Nixpkgs.
+Following some convetions, we can reuse the nix expressions in the upstream
+project.
 
-1. Define a package (in this example, in the `flake.nix`) like this:
+For a full derivation example, see
+https://github.com/jlesquembre/nixpkgs/blob/share-nixpkgs/pkgs/applications/misc/simple-pkg/default.nix
+
+1. (**upstream**) Define a package (in this example, in the `flake.nix`) like
+   this:
 
    ```nix
-   packages.default = pkgs.callPackage ./pkgs/default.nix {
-     projectSrc = ./.;
+   packages.default = pkgs.callPackage "${nixpkgs}/pkgs/applications/misc/simple-pkg/default.nix" {
+     # Use this as src, overriding the value on nixpkgs
+     projectInfo = {
+       src = ./.;
+       version = "DEV";
+     };
    };
    ```
 
-   Notice that we have to move the derivation to its own file, and in our flake
-   we must provide one argument, `projectSrc`, the path to our project.
-
-1. Write a derivation almost like we do for any other nixpkgs derivation, with
-   some extra parts:
+1. (**Nixpkgs**) Our expression is defined like this:
 
    ```nix
    {
-     # New helper functions
-     nixpkgsUpdater
+     # ...
+     nixpkgsUpdater # Optional
    , srcFromJSON
 
-     # - Path to an "info.json" file (That's the case in nixpkgs, generated with nixpkgsUpdater)
-     # - The src attribute passed to mkDerivation (That's the case in our repository)
-   , projectSrc ? ./info.json
+     # projectInfo is overloaded, it can be:
+     # - Path to an "info.json" file (That's the case in nixpkgs)
+     # - Attribute set with values to use in mkDerivation
+   , projectInfo ? srcFromJSON ./info.json
    }:
-
-   let
-     # Here we get `src` and `version` for stdenv.mkDerivation
-     # In our repo, this function doesn't do much, just passed the projectSrc
-     # value, but on nixpkgs, gets the source based on the date in `info.json`
-     srcData = srcFromJSON projectSrc;
-   in
 
    stdenv.mkDerivation {
      pname = "simple";
-     inherit (srcData) src version;
+     inherit (projectInfo) src version;
 
      # Function to be executed by r-ryantm bot
+     # nixpkgsUpdater is optional
      passthru.updateScript = nixpkgsUpdater {
        fetcher = "fetchFromGitHub";
        fetcherArgs = {
          owner = "github-username";
          repo = "simple-flake";
        };
-       # List of files to sync with nixpkgs, relative to the Git repository root.
-       syncFiles = [ "pkgs/default.nix" ];
      };
    }
    ```
 
-   For a full example see `pkgs/default.nix`
+1. (**Nixpkgs**) Notice that we have a `info.json` file in the same directory
+   that the `default.nix` file:
 
-1. Finally, to add our package to nixpkgs, we have to add an entry to
-   `pkgs/top-level/all-packages.nix`. To generate the `info.json` file can do:
+   ```json
+   {
+     "fetcher": "fetchFromGitHub",
+     "fetcherArgs": {
+       "hash": "sha256-x9BrU5hj6HsnRudt7a7qEJOTX2WU1UdAxiPK40NLvew=",
+       "owner": "jlesquembre",
+       "repo": "simple-flake",
+       "rev": "v1.0"
+     },
+     "version": "1.0"
+   }
+   ```
+
+   `info.json` has to provide 2 fields, `fetcher` and `fetcherArgs`. `fetcher`
+   is one of the fetchers defined in
+   [Nixpkgs manual: Fetcher](https://nixos.org/manual/nixpkgs/stable/#chap-pkgs-fetchers).
+   `fetcherArgs` are the arguments to that function. Any other fields would be
+   passed to `mkDerivation`, in the `projectInfo` attribute set.
+
+   We can create `info.json` manually or with the `nixpkgsUpdater` helper
+   function:
    `nix build /path/to/local/nixpkgs#simple-pkg.updateScript; ./result`
+
+## Update shared nix code
+
+In our repository, nixpkgs is an input:
+
+```nix
+inputs = {
+  nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+};
+```
+
+To do changes, we can point nixpkgs to our local copy:
+
+```nix
+inputs = {
+  nixpkgs.url = "/path/to/my/local/nixpkgs";
+};
+```
